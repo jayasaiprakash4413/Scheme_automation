@@ -118,9 +118,7 @@ def decision_engine(overall_ltv, monthly_opp, requested_tenure):
     max_opp = max_opp.quantize(Decimal("0.01"), ROUND_HALF_UP)
 
     if min_opp <= monthly_opp <= max_opp:
-        if requested_tenure in (6, 7):
-            return ("Delight", 6)
-        return ("Delight", 12)
+        return ("Delight", requested_tenure)
 
     return ("Royal", requested_tenure)
 
@@ -145,7 +143,13 @@ def interest_engine(scheme, tenure, overall_ltv, monthly_opp):
         secure_s1 = SECURE_S1_ROYAL
         secure_s2 = SECURE_S2_ROYAL
 
-    secure_ltv = Decimal("67") if tenure != 12 else Decimal("60")
+    # secure_ltv = Decimal("67") if tenure != 12 else Decimal("60")
+    if tenure == 6:
+        secure_ltv = Decimal("67")
+    elif tenure == 7:
+        secure_ltv = Decimal("66")
+    else:
+        secure_ltv=Decimal("60")
 
     secure_s3 = secure_slab3(tenure)
 
