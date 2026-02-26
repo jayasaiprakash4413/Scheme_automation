@@ -103,6 +103,8 @@ def decision_engine(overall_ltv, monthly_opp, requested_tenure):
         unsecure_s1 = Decimal("48.00")
 
     if overall_ltv <= secure_ltv:
+        if requested_tenure in (6, 7):
+            return ("Royal", 7)
         return ("Royal", requested_tenure)
 
     secure_weight = secure_ltv / overall_ltv
@@ -119,6 +121,9 @@ def decision_engine(overall_ltv, monthly_opp, requested_tenure):
 
     if min_opp <= monthly_opp <= max_opp:
         return ("Delight", requested_tenure)
+
+    if requested_tenure in (6, 7):
+        return ("Royal", 7)
 
     return ("Royal", requested_tenure)
 
@@ -150,7 +155,6 @@ def interest_engine(scheme, tenure, overall_ltv, monthly_opp):
         secure_ltv = Decimal("66")
     else:
         secure_ltv=Decimal("60")
-
     secure_s3 = secure_slab3(tenure)
 
     if tenure == 12:
@@ -190,13 +194,22 @@ def update_charge_text(json_str, unsecure_pf, overall_pf):
     data["processingFee"] = f"{overall_pf.quantize(Decimal('0.00'), ROUND_HALF_UP)}%+GST"
     return json.dumps(data)
 
-def update_bs2_charge_2(json_str, charge_value, backcalc_min, backcalc_max):
+def update_bs2_charge_2(json_str, charge_value, backcalc_min, backcalc_max, is_flexi):
     data = json.loads(json_str)
     data["chargeValue"] = float(charge_value.quantize(Decimal("0.00"), ROUND_HALF_UP))
-    if "chargesMetaData" not in data or not isinstance(data["chargesMetaData"], dict):
-        data["chargesMetaData"] = {}
-    data["chargesMetaData"]["minPercentUnsecure"] = float(backcalc_min.quantize(Decimal("0.00"), ROUND_HALF_UP))
-    data["chargesMetaData"]["maxPercentUnsecure"] = float(backcalc_max.quantize(Decimal("0.00"), ROUND_HALF_UP))
+
+    if is_flexi:
+        if "chargesMetaData" not in data or not isinstance(data["chargesMetaData"], dict):
+            data["chargesMetaData"] = {}
+        data["chargesMetaData"]["minPercentUnsecure"] = float(backcalc_min.quantize(Decimal("0.00"), ROUND_HALF_UP))
+        data["chargesMetaData"]["maxPercentUnsecure"] = float(backcalc_max.quantize(Decimal("0.00"), ROUND_HALF_UP))
+    else:
+        data["chargeCalculationType"] = "fixed-percentage"
+        data["chargeType"] = "processing-fee"
+        data["percentageOn"] = "loanamount"
+        if "chargesMetaData" in data:
+            data.pop("chargesMetaData")
+
     return json.dumps(data)
 
 def update_bs2_legal_name(text, tenure, encoding):
@@ -239,16 +252,22 @@ def update_interest_json(json_str, slabs, tenure_days):
         return json_str
 
     slab_list = _find_slab_list(data)
-    if not slab_list:
+    if slab_list:
+        max_count = min(3, len(slab_list), len(slabs))
+        for i in range(max_count):
+            value = Decimal(slabs[i]).quantize(Decimal("0.00"), ROUND_HALF_UP)
+            slab_list[i]["interestRate"] = float(value)
+
+        if slab_list and isinstance(slab_list[-1], dict):
+            slab_list[-1]["toDay"] = tenure_days
+
         return json.dumps(data)
 
-    max_count = min(3, len(slab_list), len(slabs))
-    for i in range(max_count):
-        value = Decimal(slabs[i]).quantize(Decimal("0.00"), ROUND_HALF_UP)
-        slab_list[i]["interestRate"] = float(value)
-
-    if slab_list and isinstance(slab_list[-1], dict):
-        slab_list[-1]["toDay"] = tenure_days
+    if isinstance(data, dict) and "interestRate" in data and len(slabs) > 0:
+        data["interestRate"] = float(Decimal(slabs[0]).quantize(Decimal("0.00"), ROUND_HALF_UP))
+        if "toDay" in data:
+            data["toDay"] = tenure_days
+        return json.dumps(data)
 
     return json.dumps(data)
 
@@ -368,7 +387,8 @@ if uploaded_file:
                     df.at[idx, "bs2-charge-2"],
                     charge_pf_value,
                     min_unsecure_pf,
-                    max_unsecure_pf
+                    max_unsecure_pf,
+                    is_flexi
                 )
 
             if "bs2-legalName" in df.columns:
